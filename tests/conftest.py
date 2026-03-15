@@ -1,13 +1,29 @@
 """Pytest configuration and fixtures."""
 
+from __future__ import annotations
+
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def reset_env(monkeypatch):
-    """Reset environment variables before each test."""
-    # Clear any SYMPHONY_ prefixed env vars
-    import os
-    for key in list(os.environ.keys()):
-        if key.startswith("SYMPHONY_"):
-            monkeypatch.delenv(key, raising=False)
+@pytest.fixture
+def feishu_app_id():
+    """Mock Feishu app ID."""
+    return "cli_test_app_id"
+
+
+@pytest.fixture
+def feishu_app_secret():
+    """Mock Feishu app secret."""
+    return "test_app_secret"
+
+
+@pytest.fixture
+def feishu_bitable_token():
+    """Mock Feishu Bitable token."""
+    return "Fldxxxxx"
+
+
+@pytest.fixture
+def feishu_table_id():
+    """Mock Feishu table ID."""
+    return "tblxxxxx"
