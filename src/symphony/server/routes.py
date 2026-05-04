@@ -161,3 +161,30 @@ async def dashboard(request: Request) -> dict[str, Any]:
             "poll_interval": request.app.state.config.poll_interval_seconds,
         },
     }
+
+
+@router.post("/feishu/callback")
+async def feishu_callback(request: Request) -> dict[str, Any]:
+    """Handle Feishu interactive card action callbacks."""
+    notifier = getattr(request.app.state, "notifier", None)
+    if not notifier:
+        raise HTTPException(status_code=503, detail="Notifier not configured")
+
+    body = await request.json()
+
+    # Handle URL verification challenge
+    if body.get("type") == "url_verification":
+        return {"challenge": body.get("challenge", "")}
+
+    # Handle card action event
+    event = body.get("event", {})
+    action_data = event.get("action", {})
+
+    payload = {
+        "token": body.get("token", ""),
+        "open_id": event.get("operator", {}).get("open_id", ""),
+        "action": action_data,
+        "open_message_id": event.get("message", {}).get("message_id", ""),
+    }
+
+    return await notifier.handle_callback(payload)

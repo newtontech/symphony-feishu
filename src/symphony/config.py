@@ -16,11 +16,20 @@ class TrackerConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="SYMPHONY_TRACKER_")
 
+    # Tracker kind selection
+    kind: str = "linear"
+
     # Linear configuration
     linear_api_key: str | None = None
     linear_api_url: str = "https://api.linear.app/graphql"
     linear_team_id: str | None = None
     linear_project_id: str | None = None
+
+    # Feishu configuration
+    feishu_app_id: str | None = None
+    feishu_app_secret: str | None = None
+    feishu_tasklist_id: str | None = None
+    feishu_base_url: str = "https://open.feishu.cn"
 
 
 class WorkspaceConfig(BaseSettings):
@@ -61,6 +70,35 @@ class ServerConfig(BaseSettings):
     cors_origins: list[str] = Field(default_factory=lambda: ["*"])
 
 
+class NotificationConfig(BaseSettings):
+    """Notification provider configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="SYMPHONY_NOTIFICATION_")
+
+    kind: str = "feishu"
+
+    # Feishu Bot credentials (same app as tracker or separate)
+    feishu_app_id: str | None = None
+    feishu_app_secret: str | None = None
+    feishu_base_url: str = "https://open.feishu.cn"
+
+    # Default targets
+    feishu_chat_id: str | None = None  # Group chat for broadcast notifications
+    feishu_admin_open_id: str | None = None  # Admin user for DM notifications
+
+    # Bot verification token (for webhook callback validation)
+    feishu_verification_token: str | None = None
+    feishu_encrypt_key: str | None = None
+
+    # Feature toggles
+    notify_on_issue_start: bool = True
+    notify_on_issue_complete: bool = True
+    notify_on_issue_fail: bool = True
+    notify_on_pr_created: bool = True
+    notify_on_agent_reply: bool = True
+    interactive_approval: bool = True
+
+
 class LoggingConfig(BaseSettings):
     """Logging configuration."""
 
@@ -91,6 +129,7 @@ class Config(BaseSettings):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    notification: NotificationConfig = Field(default_factory=NotificationConfig)
 
     @classmethod
     def from_env(cls) -> Config:

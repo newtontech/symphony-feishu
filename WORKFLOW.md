@@ -1,6 +1,8 @@
 ---
 name: symphony-default
 description: Default Symphony workflow for coding agents
+tracker:
+  kind: linear
 max_concurrent: 1
 retry_limit: 3
 retry_delay_seconds: 60

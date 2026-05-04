@@ -71,13 +71,42 @@ def start(ctx: click.Context, workflow: Optional[str], port: int, host: str) -> 
     config.server.port = port
     config.server.host = host
 
-    # Create components
-    tracker = LinearClient(config.tracker)
+    # Create tracker based on configured kind
+    if config.tracker.kind == "feishu":
+        from symphony.tracker.feishu import FeishuClient
+
+        tracker = FeishuClient(config.tracker)
+    else:
+        tracker = LinearClient(config.tracker)
     from symphony.agent_runner import AgentRunner
     from symphony.workspace import WorkspaceManager
 
     workspace_manager = WorkspaceManager(config.workspace)
     agent_runner = AgentRunner(config.agent)
+
+    # Create notifier if configured
+    notifier = None
+    if config.notification.kind == "feishu" and config.notification.feishu_app_id:
+        from symphony.notification.feishu import FeishuNotifier
+
+        notifier = FeishuNotifier(config.notification)
+
+        # Register approval/reject callbacks
+        if config.notification.interactive_approval:
+            from symphony.models import IssueStatus
+
+            async def handle_approve(payload: dict) -> None:
+                issue_id = payload.get("action", {}).get("value", {}).get("issue_id")
+                if issue_id:
+                    await tracker.update_status(issue_id, IssueStatus.DONE)
+
+            async def handle_reject(payload: dict) -> None:
+                issue_id = payload.get("action", {}).get("value", {}).get("issue_id")
+                if issue_id:
+                    await tracker.update_status(issue_id, IssueStatus.TODO)
+
+            notifier.register_callback("approve", handle_approve)
+            notifier.register_callback("reject", handle_reject)
 
     # Create orchestrator
     orchestrator = Orchestrator(
@@ -86,11 +115,12 @@ def start(ctx: click.Context, workflow: Optional[str], port: int, host: str) -> 
         tracker=tracker,
         workspace_manager=workspace_manager,
         agent_runner=agent_runner,
+        notifier=notifier,
     )
 
     # Create app
     from symphony.server.app import create_app
-    app = create_app(config=config, orchestrator=orchestrator)
+    app = create_app(config=config, orchestrator=orchestrator, notifier=notifier)
 
     console.print(f"[green]Starting Symphony server on {host}:{port}[/green]")
     console.print(f"[blue]Dashboard: http://{host}:{port}/api/v1/dashboard[/blue]")
@@ -217,6 +247,8 @@ def init() -> None:
     sample_workflow = '''---
 name: example-workflow
 description: Example Symphony workflow
+tracker:
+  kind: linear  # or "feishu" for Feishu Task integration
 max_concurrent: 1
 retry_limit: 3
 timeout_minutes: 60
@@ -250,7 +282,9 @@ Please complete this task carefully and thoroughly.
     console.print(f"[green]Created {workflow_path}[/green]")
     console.print("\n[cyan]Next steps:[/cyan]")
     console.print("1. Edit WORKFLOW.md to customize your workflow")
-    console.print("2. Set SYMPHONY_TRACKER_LINEAR_API_KEY environment variable")
+    console.print("2. Set tracker environment variables:")
+    console.print("   Linear: SYMPHONY_TRACKER_LINEAR_API_KEY")
+    console.print("   Feishu: SYMPHONY_TRACKER_FEISHU_APP_ID, SYMPHONY_TRACKER_FEISHU_APP_SECRET")
     console.print("3. Run: symphony start")
 
 

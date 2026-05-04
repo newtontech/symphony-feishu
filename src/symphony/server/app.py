@@ -32,12 +32,14 @@ async def lifespan(app: FastAPI):
 def create_app(
     config: Config | None = None,
     orchestrator: Orchestrator | None = None,
+    notifier: "Notifier | None" = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
         config: Configuration instance
         orchestrator: Orchestrator instance
+        notifier: Optional notification provider
 
     Returns:
         Configured FastAPI application
@@ -54,6 +56,7 @@ def create_app(
     # Store state
     app.state.config = config
     app.state.orchestrator = orchestrator
+    app.state.notifier = notifier
 
     # CORS middleware
     app.add_middleware(

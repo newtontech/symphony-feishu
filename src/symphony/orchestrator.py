@@ -28,9 +28,15 @@ from symphony.models import (
     WorkspaceState,
     Workflow,
 )
+from symphony.notification.base import (
+    CardAction,
+    NotificationEvent,
+    NotificationLevel,
+)
 
 if TYPE_CHECKING:
     from symphony.agent_runner import AgentRunner
+    from symphony.notification.base import Notifier
     from symphony.tracker.base import IssueTracker
     from symphony.workspace import WorkspaceManager
 
@@ -47,16 +53,19 @@ class Orchestrator:
         tracker: IssueTracker,
         workspace_manager: WorkspaceManager,
         agent_runner: AgentRunner,
+        notifier: Notifier | None = None,
     ):
         self.config = config
         self.workflow = workflow
         self.tracker = tracker
         self.workspace_manager = workspace_manager
         self.agent_runner = agent_runner
+        self.notifier = notifier
 
         self._state = OrchestratorState.STOPPED
         self._task: asyncio.Task[None] | None = None
         self._active_workspaces: dict[UUID, Workspace] = {}
+        self._issue_notifications: dict[str, str] = {}
         self._metrics = Metrics()
         self._start_time: float | None = None
         self._last_poll_time: str | None = None
@@ -213,6 +222,9 @@ class Orchestrator:
             # Update issue status
             await self.tracker.update_status(issue.id, IssueStatus.IN_PROGRESS)
 
+            # Notify: agent started
+            await self._notify_issue_start(issue)
+
             # Run agent with retry
             try:
                 async for attempt in AsyncRetrying(
@@ -232,6 +244,9 @@ class Orchestrator:
             self._metrics.total_issues_completed += 1
             logger.info(f"Issue {issue.identifier} completed successfully")
 
+            # Notify: agent completed
+            await self._notify_issue_complete(issue)
+
         except Exception as e:
             logger.error(f"Failed to process issue {issue.identifier}: {e}")
             self._metrics.total_issues_failed += 1
@@ -239,6 +254,9 @@ class Orchestrator:
                 await self.tracker.update_status(issue.id, IssueStatus.TODO)
             except Exception:
                 pass
+
+            # Notify: agent failed
+            await self._notify_issue_failed(issue, str(e))
 
         finally:
             # Cleanup workspace
@@ -281,3 +299,81 @@ class Orchestrator:
             logger.warning(
                 f"Timeout waiting for {len(self._active_workspaces)} workspaces"
             )
+
+    # ------------------------------------------------------------------
+    # Notification helpers
+    # ------------------------------------------------------------------
+
+    async def _notify_issue_start(self, issue: Issue) -> None:
+        """Send notification when agent starts working on an issue."""
+        if not self.notifier:
+            return
+        try:
+            event = NotificationEvent(
+                title=f"Agent started: {issue.identifier}",
+                message="Agent is now working on this issue",
+                level=NotificationLevel.INFO,
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                issue_title=issue.title,
+            )
+            actions = None
+            if self.config.notification.interactive_approval:
+                actions = [
+                    CardAction(
+                        label="Approve", action="approve",
+                        value={"issue_id": issue.id}, style="primary",
+                    ),
+                    CardAction(
+                        label="Reject", action="reject",
+                        value={"issue_id": issue.id}, style="danger",
+                    ),
+                ]
+            msg_id = await self.notifier.send_card(event, actions)
+            if msg_id:
+                self._issue_notifications[issue.id] = msg_id
+        except Exception:
+            logger.exception("Failed to send start notification for %s", issue.identifier)
+
+    async def _notify_issue_complete(self, issue: Issue) -> None:
+        """Send notification when agent completes an issue."""
+        if not self.notifier:
+            return
+        try:
+            event = NotificationEvent(
+                title=f"Agent completed: {issue.identifier}",
+                message=f"Issue completed successfully",
+                level=NotificationLevel.SUCCESS,
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                issue_title=issue.title,
+            )
+            msg_id = self._issue_notifications.pop(issue.id, None)
+            if msg_id:
+                await self.notifier.update_card(msg_id, event)
+            else:
+                await self.notifier.send_card(event)
+        except Exception:
+            logger.exception("Failed to send complete notification for %s", issue.identifier)
+
+    async def _notify_issue_failed(self, issue: Issue, error: str) -> None:
+        """Send notification when agent fails on an issue."""
+        if not self.notifier:
+            return
+        try:
+            event = NotificationEvent(
+                title=f"Agent failed: {issue.identifier}",
+                message="Agent encountered an error",
+                level=NotificationLevel.ERROR,
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                issue_title=issue.title,
+                error=error[:500],
+            )
+            msg_id = self._issue_notifications.pop(issue.id, None)
+            if msg_id:
+                await self.notifier.update_card(msg_id, event)
+            else:
+                await self.notifier.send_card(event)
+        except Exception:
+            logger.exception("Failed to send failure notification for %s", issue.identifier)
